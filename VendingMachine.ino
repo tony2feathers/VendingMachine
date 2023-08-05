@@ -25,9 +25,10 @@ const char* mqtt_server = "10.1.10.55";
 
 WiFiClient espClient;
 PubSubClient client(espClient);
+
 long lastMsg = 0;
 char msg[50];
-int calue = 0;
+int value = 0;
 
 const long interval = 1000;
 unsigned long previousMillis = 0;
@@ -95,7 +96,7 @@ const int pwmChannel = 0;
 const int resolution = 8;
 int dutyCycle = 200;
 
-#define DEBUG ;
+#define DEBUG;
 
 // define IR sensor pins
 const int IRentrancePin = 23;
@@ -148,9 +149,7 @@ void MQTTsetup() {
       Serial.println("Connected to MQTT broker");
 
       // Once connected, publish an announcement to the host
-      tempString = strdup("Vending Machine Connected!");
-      client.publish(hostTopic, tempString);
-      free(tempString);
+      client.publish(hostTopic, "Vending Machine Connected!");
       // Subscribe to topics meant for this device
       client.subscribe(topic);
       Serial.println("Subscribed to topic: ");
@@ -172,10 +171,14 @@ void callback(char* thisTopic, byte* message, unsigned int length) {
   Serial.print("] ");
   Serial.println("Message: ");
   
-  // COnvert byte array to C-style string
+  // Convert byte array to C-style string
   char messageArrived[length + 1];
   memcpy(messageArrived, message, length);
   messageArrived[length] = '\0'; // Null-terminate the string
+ 
+  for (unsigned int i = 0; i < length; i++) {
+    messageArrived[i] = tolower(messageArrived[i]);
+  }
 
   // Use strcmp to look for certain messages
   if (strcmp(messageArrived, "dispense") == 0){
@@ -189,7 +192,7 @@ void callback(char* thisTopic, byte* message, unsigned int length) {
   } else if (strcmp(messageArrived, "close") == 0){
     onClose();
   }
-
+  Serial.println(messageArrived);
   Serial.println();
 }
 
@@ -236,8 +239,6 @@ void setup() {
   // attach the channel to the GPIO to be controlled
   //ledcAttachPin(MotorA, pwmChannel);
 
-
-
   // Initialize the NeoPixel strip objects
   Strip1leds.begin();
   Strip1leds.show();
@@ -271,7 +272,7 @@ void incomingImpuls() {
 
 void loop() {
   // Check if there is any data available in the Serial Monitor
-  if (Serial.available()) {
+  /*if (Serial.available()) {
     // Read the incoming data and append it to the serialData variable
     char c = Serial.read();
     serialData += c;
@@ -289,7 +290,7 @@ void loop() {
       // Clear the serialData variable to prepare for the next message
       serialData = "";
     }
-  }
+  }*/
 
   //If we have received a coin, activate stuff
   if (impulseCount >= targetPulses) {
@@ -301,21 +302,17 @@ void loop() {
   }
 
   IRentrance = digitalRead(IRentrancePin);
-  if (IRentrance == LOW) {
+  if (IRentrance == HIGH) {
     ballReturn++;
     cylonStrip1ATrail(Strip1leds.Color(0, 119, 178), 50, 10);
     digitalWrite(MotorIN1, LOW);
     digitalWrite(MotorIN2, HIGH);
-    tempString = strdup("Ball entered escalator");
-    client.publish(hostTopic, tempString);
-    free(tempString);
+    client.publish(hostTopic, "Ball entered escalator");
   }
   IRexit = digitalRead(IRexitPin);
-  if (IRexit == LOW) {
+  if (IRexit == HIGH) {
     ballReturn--;
-    tempString = strdup("Ball exited escalator");
-    client.publish(hostTopic, tempString);
-    free(tempString);
+    client.publish(hostTopic, "Ball exited escalator");
   }
   if (ballReturn == 0) {
     digitalWrite(MotorIN1, LOW);
@@ -329,10 +326,8 @@ void loop() {
 void onDispense() {
   dispenserStepper.step(100);  // Turn the stepper 180 degrees
   impulseCount = 0;            // Reset the impulse counter
-  tempString = strdup("Ball dispense activated. Players should now have a ball in the marble run!");
   Serial.print("Ball dispense activated. Players should now have a ball in the marble run!");
-  client.publish(hostTopic, tempString);
-  free(tempString);
+  client.publish(hostTopic, "Ball dispense activated. Players should now have a ball in the marble run!");
 }
 
 void onStop() {
@@ -341,10 +336,8 @@ void onStop() {
   digitalWrite(MotorIN2, LOW);
   digitalWrite(MotorIN3, LOW);
   digitalWrite(MotorIN4, LOW);
-  tempString = strdup("All motor stop command received!");
   Serial.print("All motor stop command received!");
-  client.publish(hostTopic, tempString);
-  free(tempString);
+  client.publish(hostTopic, "All motor stop command received!");
 }
 
 void onOpen() {
@@ -354,10 +347,8 @@ void onOpen() {
   delay(500);
   digitalWrite(MotorIN3, LOW);
   digitalWrite(MotorIN4, LOW);
-  tempString = strdup("Coin OPEN command received");
   Serial.print("Coin OPEN command received");
-  client.publish(hostTopic, tempString);
-  free(tempString);
+  client.publish(hostTopic, "Coin OPEN command received");
 }
 
 void onClose() {
@@ -367,20 +358,16 @@ void onClose() {
   delay(500);
   digitalWrite(MotorIN3, LOW);
   digitalWrite(MotorIN4, LOW);
-  tempString = strdup("Coin CLOSE command received");
   Serial.print("Coin CLOSE command received");
-  client.publish(hostTopic, tempString);
-  free(tempString);
+  client.publish(hostTopic, "Coin CLOSE command received");
 }
 
 
 void onReverse() {
   digitalWrite(MotorIN1, HIGH);
   digitalWrite(MotorIN2, LOW);
-  tempString = strdup("Reverse motor command received");
   Serial.print("Reverse motor command received");
-  client.publish(hostTopic, tempString);
-  free(tempString);
+  client.publish(hostTopic, "Reverse motor command received");
   delay(500);
   digitalWrite(MotorIN1, LOW);
   digitalWrite(MotorIN2, HIGH);
