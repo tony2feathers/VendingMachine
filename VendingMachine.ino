@@ -6,7 +6,6 @@
 */
 
 // Includes
-
 #include <SPI.h>
 #include <PubSubClient.h>
 #include <WiFi.h>
@@ -14,7 +13,6 @@
 #include <Adafruit_NeoPixel.h>
 #include <Arduino.h>
 #include "esp_secrets.h"
-
 
 // Constants
 char ssid[] = SECRET_SSID;    // your network SSID (name)
@@ -26,6 +24,7 @@ const char* mqtt_server = "10.1.10.55";
 WiFiClient espClient;
 PubSubClient client(espClient);
 
+// I think these are remnants of old code??
 long lastMsg = 0;
 char msg[50];
 int value = 0;
@@ -33,27 +32,15 @@ int value = 0;
 const long interval = 1000;
 unsigned long previousMillis = 0;
 
+// constants for MQTT
 const char topic[] = "ToDevice/VendingMachine";
 const char hostTopic[] = "ToHost/VendingMachine";
 const char* deviceID = "VendingMachine";
-char* tempString;
-
-String serialData;
-
 
 int count = 0;
 
 // Variable to count the balls currently in the escalator
 int ballReturn = 0;
-
-// Create puzzle states to track the puzzle progress
-enum DeviceState { INITIALIZING,
-                   RUNNING,
-                   SOLVED };
-DeviceState deviceState = DeviceState::INITIALIZING;
-
-
-/* Put the proper code in here for wifi connection and MQTT connection */
 
 // Attach the coin counter to pin 22 and define other things related to the coin counter
 const byte coinCounter = 22;
@@ -84,13 +71,9 @@ const byte MotorIN4 = 17;
 const int stepsPerRevolution = 200;
 Stepper dispenserStepper(stepsPerRevolution, 14, 27, 26, 25);
 
-int IRentrance;
-int IRexit;
-
 // DEFINES
 
-// Setting PWM properties
-
+// Setting PWM properties to control motor speed
 const int freq = 30000;
 const int pwmChannel = 0;
 const int resolution = 8;
@@ -210,6 +193,8 @@ void setup() {
 
   // Set all the control pins to outputs and inputs as appropriate.
   pinMode(coinCounter, INPUT);
+  pinMode(IRentrancePin, INPUT);
+  pinMode(IRexitPin, INPUT);
 
   // Interrupt connected to pin 22 executing IncomingImpuls function when signal goes from High to Low
   attachInterrupt(digitalPinToInterrupt(coinCounter), incomingImpuls, RISING);
@@ -273,6 +258,7 @@ void incomingImpuls() {
 void loop() {
   // Check if there is any data available in the Serial Monitor
   /*if (Serial.available()) {
+    String serialData;
     // Read the incoming data and append it to the serialData variable
     char c = Serial.read();
     serialData += c;
@@ -301,16 +287,16 @@ void loop() {
   else {
   }
 
-  IRentrance = digitalRead(IRentrancePin);
-  if (IRentrance == HIGH) {
+  int IRentrance = digitalRead(IRentrancePin);
+  if (IRentrance == LOW) {
     ballReturn++;
     cylonStrip1ATrail(Strip1leds.Color(0, 119, 178), 50, 10);
     digitalWrite(MotorIN1, LOW);
     digitalWrite(MotorIN2, HIGH);
     client.publish(hostTopic, "Ball entered escalator");
   }
-  IRexit = digitalRead(IRexitPin);
-  if (IRexit == HIGH) {
+  int IRexit = digitalRead(IRexitPin);
+  if (IRexit == LOW) {
     ballReturn--;
     client.publish(hostTopic, "Ball exited escalator");
   }
@@ -361,7 +347,6 @@ void onClose() {
   Serial.print("Coin CLOSE command received");
   client.publish(hostTopic, "Coin CLOSE command received");
 }
-
 
 void onReverse() {
   digitalWrite(MotorIN1, HIGH);
