@@ -3,7 +3,7 @@
 
   In this puzzle, players must insert appropriate coins into the machine in order to release a ball
   into the interactive marble run/maze.
-*/
+
 
 // Includes
 #include <SPI.h>
@@ -42,14 +42,14 @@ int count = 0;
 // Variable to count the balls currently in the escalator
 int ballReturn = 0;
 
-// Attach the coin counter to pin 22 and define other things related to the coin counter
-const byte coinCounter = 22;
+// Attach the coin counter to pin 34 and define other things related to the coin counter
+const byte coinCounter = 34;
 
 // Number of impulses detected
 volatile int impulseCount = 0;
 
 // Number of pulses for a coin detected
-const int targetPulses = 2;
+const int targetPulses = 1;
 
 // Define pins for the Nema17 Stepper motor used for the dispenser
 const byte Dispenser1 = 14;
@@ -98,6 +98,139 @@ const int Strip1BLEN = 30;
 // Create instance of NeoPixel for the strip of LEDs
 Adafruit_NeoPixel Strip1leds(Strip1_NUM_LEDS, Strip1_Pin, NEO_GRB + NEO_KHZ800);
 
+//************************INTERRUPT FUNCTIONS************************
+void incomingImpuls() {
+  impulseCount = impulseCount + 1;
+}
+
+void setup() {
+#ifdef DEBUG
+  Serial.begin(115200);
+#endif
+
+  // Setup the wifi and MQTT connections
+  wifiSetup();
+  MQTTsetup();
+  Serial.print("Connected to WIFI and MQTT!");
+
+  // Set the speed of the dispenser stepper motor
+  dispenserStepper.setSpeed(60);
+
+  // Set all the control pins to outputs and inputs as appropriate.
+  pinMode(coinCounter, INPUT);
+  pinMode(IRentrancePin, INPUT);
+  pinMode(IRexitPin, INPUT);
+
+  // Interrupt connected to pin 22 executing IncomingImpuls function when signal goes from High to Low
+  attachInterrupt(digitalPinToInterrupt(coinCounter), incomingImpuls, FALLING);
+
+  pinMode(MotorA, OUTPUT);
+  pinMode(MotorIN1, OUTPUT);
+  pinMode(MotorIN2, OUTPUT);
+
+  pinMode(MotorB, OUTPUT);
+  pinMode(MotorIN3, OUTPUT);
+  pinMode(MotorIN4, OUTPUT);
+
+  pinMode(Dispenser1, OUTPUT);
+  pinMode(Dispenser2, OUTPUT);
+  pinMode(Dispenser3, OUTPUT);
+  pinMode(Dispenser4, OUTPUT);
+
+  // Turn off motors - Initial State
+  digitalWrite(MotorIN1, LOW);
+  digitalWrite(MotorIN2, LOW);
+  digitalWrite(MotorIN3, LOW);
+  digitalWrite(MotorIN4, LOW);
+
+  // configure LED PWM functionalities
+  ledcSetup(pwmChannel, freq, resolution);
+
+  // attach the channel to the GPIO to be controlled
+  ledcAttachPin(MotorA, pwmChannel);
+
+  // Initialize the NeoPixel strip objects
+  Strip1leds.begin();
+  Strip1leds.show();
+  Strip1leds.setBrightness(75);
+
+  for (int x = 0; x < Strip1_NUM_LEDS; x++) {
+    // Cycle the lights blue
+    Strip1leds.setPixelColor(x, Strip1leds.Color(0, 0, 255));
+  }
+  Strip1leds.show();
+  delay(500);
+
+  for (int y = 0; y < Strip1_NUM_LEDS; y++) {
+    // Cycle the lights off
+    Strip1leds.setPixelColor(y, Strip1leds.Color(0, 0, 0));
+  }
+  Strip1leds.show();
+  delay(500);
+  Serial.println("LED's tested, turning on ambient lights!");
+
+int z = 0;
+for (int z = Strip1BStart; z < (Strip1BStart + Strip1BLEN); z++) {
+  // Activate the top strip of lights for "ambient lighting"
+  Strip1leds.setPixelColor(z, Strip1leds.Color(204, 85, 0));
+}
+}
+
+void loop() {
+  // Check if there is any data available in the Serial Monitor
+  /*if (Serial.available()) {
+    String serialData;
+    // Read the incoming data and append it to the serialData variable
+    char c = Serial.read();
+    serialData += c;
+
+    // Check if the incoming data ends with a newline character, indicating the end of a message
+    if (c == '\n') {
+      // Publish the data to the MQTT broker
+      serialData.trim(); // Remove leading and trailing whitespace
+      Serial.print("Publishing message to topic: ");
+      Serial.println(topic);
+      Serial.print("Message: ");
+      Serial.println(serialData);
+      client.publish(topic, serialData.c_str());
+
+      // Clear the serialData variable to prepare for the next message
+      serialData = "";
+    }
+  }
+
+  //If we have received a coin, activate stuff
+  if (impulseCount >= targetPulses) {
+    onDispense();
+  }
+
+  // If we haven't received a coin, keep waiting
+  else {
+  }
+
+  int IRentrance = digitalRead(IRentrancePin);
+  if (IRentrance == HIGH) {
+    ballReturn++;
+    cylonStrip1ATrail(Strip1leds.Color(0, 119, 178), 50, 10);
+    digitalWrite(MotorIN1, LOW);
+    digitalWrite(MotorIN2, HIGH);
+    client.publish(hostTopic, "Ball entered escalator");
+  }
+  int IRexit = digitalRead(IRexitPin);
+  if (IRexit == HIGH) {
+    ballReturn--;
+    client.publish(hostTopic, "Ball exited escalator");
+  }
+  if (ballReturn == 0) {
+    digitalWrite(MotorIN1, LOW);
+    digitalWrite(MotorIN2, LOW);
+  }
+
+  delay(500);
+  client.loop();
+}
+
+//************************WIFI & MQTT FUNCTIONS************************
 void wifiSetup() {
   Serial.println();
   Serial.println("****************************");
@@ -179,140 +312,11 @@ void callback(char* thisTopic, byte* message, unsigned int length) {
   Serial.println();
 }
 
-void setup() {
-#ifdef DEBUG
-  Serial.begin(115200);
-#endif
-
-  // Setup the wifi and MQTT connections
-  wifiSetup();
-  MQTTsetup();
-  Serial.print("Connected to WIFI and MQTT!");
-  // Set the speed of the dispenser stepper motor
-  dispenserStepper.setSpeed(60);
-
-  // Set all the control pins to outputs and inputs as appropriate.
-  pinMode(coinCounter, INPUT);
-  pinMode(IRentrancePin, INPUT);
-  pinMode(IRexitPin, INPUT);
-
-  // Interrupt connected to pin 22 executing IncomingImpuls function when signal goes from High to Low
-  attachInterrupt(digitalPinToInterrupt(coinCounter), incomingImpuls, RISING);
-
-  pinMode(MotorA, OUTPUT);
-  pinMode(MotorIN1, OUTPUT);
-  pinMode(MotorIN2, OUTPUT);
-
-  pinMode(MotorB, OUTPUT);
-  pinMode(MotorIN3, OUTPUT);
-  pinMode(MotorIN4, OUTPUT);
-
-  pinMode(Dispenser1, OUTPUT);
-  pinMode(Dispenser2, OUTPUT);
-  pinMode(Dispenser3, OUTPUT);
-  pinMode(Dispenser4, OUTPUT);
-
-  // Turn off motors - Initial State
-  digitalWrite(MotorIN1, LOW);
-  digitalWrite(MotorIN2, LOW);
-  digitalWrite(MotorIN3, LOW);
-  digitalWrite(MotorIN4, LOW);
-
-  // configure LED PWM functionalities
-  //ledcSetup(pwmChannel, freq, resolution);
-
-  // attach the channel to the GPIO to be controlled
-  //ledcAttachPin(MotorA, pwmChannel);
-
-  // Initialize the NeoPixel strip objects
-  Strip1leds.begin();
-  Strip1leds.show();
-  Strip1leds.setBrightness(75);
-
-  for (int x = 0; x < Strip1_NUM_LEDS; x++) {
-    // Cycle the lights blue
-    Strip1leds.setPixelColor(x, Strip1leds.Color(0, 0, 255));
-  }
-  Strip1leds.show();
-  delay(500);
-
-  for (int y = 0; y < Strip1_NUM_LEDS; y++) {
-    // Cycle the lights off
-    Strip1leds.setPixelColor(y, Strip1leds.Color(0, 0, 0));
-  }
-  Strip1leds.show();
-  delay(500);
-  Serial.println("LED's tested, turning on ambient lights!");
-
-int z = 0;
-for (int z = Strip1BStart; z < (Strip1BStart + Strip1BLEN); z++) {
-  // Activate the top strip of lights for "ambient lighting"
-  Strip1leds.setPixelColor(z, Strip1leds.Color(204, 85, 0));
-}
-}
-
-void incomingImpuls() {
-  impulseCount = impulseCount + 1;
-}
-
-void loop() {
-  // Check if there is any data available in the Serial Monitor
-  /*if (Serial.available()) {
-    String serialData;
-    // Read the incoming data and append it to the serialData variable
-    char c = Serial.read();
-    serialData += c;
-
-    // Check if the incoming data ends with a newline character, indicating the end of a message
-    if (c == '\n') {
-      // Publish the data to the MQTT broker
-      serialData.trim(); // Remove leading and trailing whitespace
-      Serial.print("Publishing message to topic: ");
-      Serial.println(topic);
-      Serial.print("Message: ");
-      Serial.println(serialData);
-      client.publish(topic, serialData.c_str());
-
-      // Clear the serialData variable to prepare for the next message
-      serialData = "";
-    }
-  }*/
-
-  //If we have received a coin, activate stuff
-  if (impulseCount >= targetPulses) {
-    onDispense();
-  }
-
-  // If we haven't received a coin, keep waiting
-  else {
-  }
-
-  int IRentrance = digitalRead(IRentrancePin);
-  if (IRentrance == LOW) {
-    ballReturn++;
-    cylonStrip1ATrail(Strip1leds.Color(0, 119, 178), 50, 10);
-    digitalWrite(MotorIN1, LOW);
-    digitalWrite(MotorIN2, HIGH);
-    client.publish(hostTopic, "Ball entered escalator");
-  }
-  int IRexit = digitalRead(IRexitPin);
-  if (IRexit == LOW) {
-    ballReturn--;
-    client.publish(hostTopic, "Ball exited escalator");
-  }
-  if (ballReturn == 0) {
-    digitalWrite(MotorIN1, LOW);
-    digitalWrite(MotorIN2, LOW);
-  }
-
-  delay(500);
-  client.loop();
-}
-
+//************************MQTT MESSAGE FUNCTIONS************************
 void onDispense() {
   dispenserStepper.step(100);  // Turn the stepper 180 degrees
   impulseCount = 0;            // Reset the impulse counter
-  Serial.print("Ball dispense activated. Players should now have a ball in the marble run!");
+  Serial.println("Ball dispense activated. Players should now have a ball in the marble run!");
   client.publish(hostTopic, "Ball dispense activated. Players should now have a ball in the marble run!");
 }
 
@@ -358,6 +362,7 @@ void onReverse() {
   digitalWrite(MotorIN2, HIGH);
 }
 
+//************************LIGHTING FUNCTIONS************************
 void cylonStrip1ATrail(uint32_t c, uint8_t wait, uint8_t reps) {
   for (int j = reps; reps > 0; reps--) {
     int i = 0;
@@ -396,4 +401,4 @@ void fadeToBlackStrip1A(int ledNo, byte fadeValue) {
   b = (b <= 10) ? 0 : (int)b - (b * fadeValue / 256);
 
   Strip1leds.setPixelColor(ledNo, r, g, b);
-}
+}*/
