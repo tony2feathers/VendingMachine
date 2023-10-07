@@ -40,7 +40,12 @@ char msg[50];
 int value = 0;
 
 const long interval = 1000;
+unsigned long curMillis = 0;
+unsigned long curTime = 0;
+unsigned long preTime = 0;
 unsigned long previousMillis = 0;
+const long coinInt = 1000;
+
 
 // constants for MQTT
 const char topic[] = "ToDevice/VendingMachine";
@@ -60,6 +65,9 @@ volatile int impulseCount = 0;
 
 // Number of pulses for a coin detected
 const int targetPulses = 1;
+
+// Variable to measure intervals between imposes
+
 
 // Define pins for the Nema17 Stepper motor used for the dispenser
 const byte Dispenser1 = 14;
@@ -82,14 +90,17 @@ const int stepsPerRevolution = 200;
 Stepper dispenserStepper(stepsPerRevolution, 14, 27, 26, 25);
 
 // DEFINES
-
+/*
 // Setting PWM properties to control motor speed
 const int freq = 30000;
 const int pwmChannel = 0;
 const int resolution = 8;
 int dutyCycle = 200;
+*/
 
-#define DEBUG;
+#ifndef DEBUG         
+
+#define DEBUG       
 
 // define IR sensor pins
 const int IRentrancePin = 23;
@@ -99,29 +110,39 @@ const int IRexitPin = 22;
 
 // Strip of LEDs includes two segments; one for static lighting and one for motion lighting
 const int Strip1_Pin = 32;
-const int Strip1_NUM_LEDS = 60;
+uint16_t Strip1_NUM_LEDS = 53;
 
 const int Strip1AStart = 0;
-const int Strip1BStart = 30;
+const int Strip1BStart = 29;
 
-const int Strip1ALEN = 30;
-const int Strip1BLEN = 30;
+const int Strip1ALEN = 29;
+const int Strip1BLEN = 24;
+
 
 // Create instance of NeoPixel for the strip of LEDs
-NeoPatterns Strip1leds(Strip1_NUM_LEDS, Strip1_Pin, NEO_GRB + NEO_KHZ800);
+NeoPatterns Strip1leds(Strip1_NUM_LEDS, Strip1_Pin, NEO_GRB+NEO_KHZ800, nullptr);
 
-//**********************INBOUND MQTT MESSAGE FUNCTIONS*********************
+//************INTERRUPT FUNCTIONS****************/
+void IRAM_ATTR incomingImpuls();
+
+//**********************INBOUND MQTT MESSAGE FUNCTIONS*********************/
 void onDispense() {
   dispenserStepper.step(100);  // Turn the stepper 180 degrees
-  impulseCount = 0;            // Reset the impulse counter
-  #ifdef DEBUG
   Serial.println("Ball dispense activated. Players should now have a ball in the marble run!");
-  #endif
-  client.publish(hostTopic, "Ball dispense activated. Players should now have a ball in the marble run!");    
+  //client.publish(hostTopic, "Ball dispense activated. Players should now have a ball in the marble run!");   
+  //preTime = curTime;
+  impulseCount = 0;
+  /*Serial.println(impulseCount);
+  Serial.print("Current time is ");
+  Serial.println(curTime);
+  Serial.print("Previous Time is ");
+  Serial.println(preTime);*/
 }
 
 void onStop() {
   // Force all motors to come to a stop immediately
+  analogWrite(MotorA, 0);
+  analogWrite(MotorB, 0);
   digitalWrite(MotorIN1, LOW);
   digitalWrite(MotorIN2, LOW);
   digitalWrite(MotorIN3, LOW);
@@ -134,9 +155,11 @@ void onStop() {
 
 void onOpen() {
   // Activate the linear actuator for 5 seconds
+  analogWrite(MotorB, 255);
   digitalWrite(MotorIN3, LOW);
   digitalWrite(MotorIN4, HIGH);
   delay(500);
+  analogWrite(MotorB, 0);
   digitalWrite(MotorIN3, LOW);
   digitalWrite(MotorIN4, LOW);
   #ifdef DEBUG
@@ -147,9 +170,11 @@ void onOpen() {
 
 void onClose() {
   // Activate the linear actuator in the other direction for 5 seconds
+  analogWrite(MotorB, 255);
   digitalWrite(MotorIN3, HIGH);
   digitalWrite(MotorIN4, LOW);
   delay(500);
+  analogWrite(MotorB, 0);
   digitalWrite(MotorIN3, LOW);
   digitalWrite(MotorIN4, LOW);
   #ifdef DEBUG
@@ -159,6 +184,7 @@ void onClose() {
 }
 
 void onReverse() {
+  analogWrite(MotorA, 255);
   digitalWrite(MotorIN1, HIGH);
   digitalWrite(MotorIN2, LOW);
   #ifdef DEBUG
@@ -170,12 +196,8 @@ void onReverse() {
   digitalWrite(MotorIN2, HIGH);
 }
 
-//************INTERRUPT FUNCTIONS****************
-void incomingImpuls() {
-  impulseCount = impulseCount + 1;
-}
 
-//************WIFI and MQTT FUNCTIONS************
+//************WIFI and MQTT FUNCTIONS************/
 void callback(char* thisTopic, byte* message, unsigned int length) {
   Serial.print("Message arrived [");
   Serial.print(thisTopic);
@@ -277,7 +299,7 @@ void setup() {
   pinMode(IRentrancePin, INPUT);
   pinMode(IRexitPin, INPUT);
 
-  // Interrupt connected to pin 22 executing IncomingImpuls function when signal goes from High to Low
+  // Interrupt connected to pin 34 executing IncomingImpuls function when signal goes from High to Low
   attachInterrupt(digitalPinToInterrupt(coinCounter), incomingImpuls, FALLING);
 
   pinMode(MotorA, OUTPUT);
@@ -298,9 +320,10 @@ void setup() {
   digitalWrite(MotorIN2, LOW);
   digitalWrite(MotorIN3, LOW);
   digitalWrite(MotorIN4, LOW);
+  Serial.println("All motors should be off! Setup complete");
 
   // attach the channel to the GPIO to be controlled
-  ledcAttachPin(MotorA, pwmChannel);
+  //ledcAttachPin(MotorA, pwmChannel);
 
   // Initialize the NeoPixel strip objects
 #ifdef DEBUG
@@ -328,44 +351,70 @@ void setup() {
   Serial.println("LED's tested, turning on ambient lights!");
 
   Strip1leds.ColorSet(Strip1leds.Color(204, 85, 0), Strip1BStart, Strip1BLEN);
+  Serial.println("Setup Complete!");
 }
 
-//***************MAIN PROGRAM*******************
+//***************MAIN PROGRAM*******************/
 void loop() {  
+  curTime = millis();
 
   //If we have received a coin, activate stuff
-  if (impulseCount >= targetPulses) {
-    onDispense();
+  if (curTime - preTime >= coinInt and impulseCount==targetPulses) {
+    Serial.print("Coin counted!");
+    //Serial.println(impulseCount);
+    onDispense(); 
+    //impulseCount=0;            // Reset the impulse counter
   }
 
-  // If we haven't received a coin, keep waiting
+  //If we haven't received a coin, keep waiting
   else {
   }
+  /*
+  Serial.print("Current Time = ");
+  Serial.println(curTime);
+  delay(1000);
+  Serial.print("Previous Time = ");
+  Serial.println(preTime);
+  delay(1000);
+  Serial.print("Impulse Count = ");
+  Serial.println(impulseCount);
+  */
 
   int IRentrance = digitalRead(IRentrancePin);
-  if (IRentrance == HIGH) {
+  if (IRentrance == LOW) {
+    Serial.print("Ball entrance triggered!");
     ballReturn++;
+    Serial.print(ballReturn);
     Strip1leds.Scanner(Strip1leds.Color(0, 119, 178), 50, Strip1AStart, Strip1_NUM_LEDS);
-    digitalWrite(MotorIN1, LOW);
-    digitalWrite(MotorIN2, HIGH);
+    analogWrite(MotorA, 255);
+    digitalWrite(MotorIN1, HIGH);
+    digitalWrite(MotorIN2, LOW);
     client.publish(hostTopic, "Ball entered escalator");
   }
 
   int IRexit = digitalRead(IRexitPin);
-  if (IRexit == HIGH){
+  if (IRexit == LOW){
+    Serial.print("Ball exit triggered!");
+    Serial.print(ballReturn);
     ballReturn--;
     client.publish(hostTopic, "Ball exited escalator");
     Strip1leds.ColorSet(Strip1leds.Color(204, 85, 0), Strip1BStart, Strip1BLEN);
     Strip1leds.ColorSet(Strip1leds.Color(0,0,0), Strip1AStart, Strip1ALEN);
   }
   if (ballReturn == 0) {
+    analogWrite(MotorA, 0);
     digitalWrite(MotorIN1, LOW);
     digitalWrite(MotorIN2, LOW);
   }
 
-  delay(500);
+  //delay(500);
   client.loop();
 
 
 
   }
+  void IRAM_ATTR incomingImpuls() {
+  impulseCount = 1;
+  preTime = curTime;
+  }
+#endif

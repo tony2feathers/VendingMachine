@@ -1,3 +1,5 @@
+#ifndef LIGHTS
+#define LIGHTS
 #include <Arduino.h>
 #include <Adafruit_NeoPixel.h>
 
@@ -35,7 +37,8 @@ class NeoPatterns : public Adafruit_NeoPixel
     void (*OnComplete)();       // Callback on completion of pattern
 
     // Constructor - calls base-class constructor to initialize the strip
-    NeoPatterns(uint16_t pixels, uint8_t pin, uint8_t type, void (*callback)() = defaultCallback) : Adafruit_NeoPixel(pixels, pin, type)
+    NeoPatterns(uint16_t pixels, uint16_t pin, uint16_t type, void (*callback)()) 
+    :Adafruit_NeoPixel(pixels, pin, type)
     {
         OnComplete = callback;
     }
@@ -444,12 +447,11 @@ class NeoPatterns : public Adafruit_NeoPixel
 
 };
 
-// Default callback function that does nothing
-void defaultCallback() {
+  // Default callback function that does nothing
+void ambientCallback() 
+    {
     // Do nothing
-}
+    Serial.println("This is a message for the ambient callback function");
+    }
 
-
-
-
-
+#endif //LIGHTS
