@@ -9,7 +9,7 @@
 //      Program for controlling the vending machine and starting the marble run puzzle
 //
 // History:     SEP-24-2022       tony2feathers     Created
-//
+//              OCT-13-2023       tony2feathers     Changed to TB6600 Motor Driver and added exButton library/functions for limit switches in place of IR sensors.
 //-------------------------------------------------------------------------
 
 //INCLUDES
@@ -17,10 +17,11 @@
 #include <SPI.h>
 #include <PubSubClient.h>
 #include <WiFi.h>
-#include <Stepper.h>
+#include <AccelStepper.h>
 #include <Adafruit_NeoPixel.h>
 #include "esp_secrets.h"
 #include <lights.h>
+#include <ezButton.h>
 
 // GLOBALS
 
@@ -44,7 +45,7 @@ unsigned long curMillis = 0;
 unsigned long curTime = 0;
 unsigned long preTime = 0;
 unsigned long previousMillis = 0;
-const long coinInt = 1000;
+const long coinInt = 500;
 
 
 // constants for MQTT
@@ -58,7 +59,7 @@ int count = 0;
 int ballReturn = 0;
 
 // Attach the coin counter to pin 34 and define other things related to the coin counter
-const byte coinCounter = 34;
+const byte coinCounter = 21;
 
 // Number of impulses detected
 volatile int impulseCount = 0;
@@ -66,19 +67,18 @@ volatile int impulseCount = 0;
 // Number of pulses for a coin detected
 const int targetPulses = 1;
 
-// Variable to measure intervals between imposes
-
-
 // Define pins for the Nema17 Stepper motor used for the dispenser
-const byte Dispenser1 = 14;
-const byte Dispenser2 = 27;
-const byte Dispenser3 = 26;
-const byte Dispenser4 = 25;
+const byte DispenserDir = 14;
+const byte DispenserStep = 26;
+// Define motor interface type
+#define motorInterfaceType 1
 
 // define pins for the motor used for the escalator
 const byte MotorA = 4;
 const byte MotorIN1 = 19;
 const byte MotorIN2 = 18;
+
+bool motorRunning = false;
 
 // define pins for the linear actuator
 const byte MotorB = 16;
@@ -86,25 +86,23 @@ const byte MotorIN3 = 5;
 const byte MotorIN4 = 17;
 
 // Initiate the instance of the stepper motor
-const int stepsPerRevolution = 200;
-Stepper dispenserStepper(stepsPerRevolution, 14, 27, 26, 25);
+AccelStepper stepper = AccelStepper(motorInterfaceType, DispenserStep, DispenserDir);
 
 // DEFINES
-/*
+
 // Setting PWM properties to control motor speed
-const int freq = 30000;
-const int pwmChannel = 0;
+const int freq = 500;
+const int pwmChannelA = 0;
+const int pwmChannelB = 1;
 const int resolution = 8;
-int dutyCycle = 200;
-*/
 
 #ifndef DEBUG         
-
 #define DEBUG       
+#endif
 
-// define IR sensor pins
-const int IRentrancePin = 23;
-const int IRexitPin = 22;
+// define buttons for entrance and exit of escalator
+ezButton entranceButton(23);
+ezButton exitButton(22);
 
 // ***************************LIGHTS*************************
 
@@ -127,26 +125,61 @@ void IRAM_ATTR incomingImpuls();
 
 //**********************INBOUND MQTT MESSAGE FUNCTIONS*********************/
 void onDispense() {
-  dispenserStepper.step(100);  // Turn the stepper 180 degrees
+  stepper.enableOutputs();
+  // Turn the stepper 180 degrees
   Serial.println("Ball dispense activated. Players should now have a ball in the marble run!");
-  //client.publish(hostTopic, "Ball dispense activated. Players should now have a ball in the marble run!");   
-  //preTime = curTime;
+  client.publish(hostTopic, "Ball dispense activated. Players should now have a ball in the marble run!");   
   impulseCount = 0;
-  /*Serial.println(impulseCount);
-  Serial.print("Current time is ");
-  Serial.println(curTime);
-  Serial.print("Previous Time is ");
-  Serial.println(preTime);*/
+  delay(500);
+  stepper.setCurrentPosition(0);
+  while(stepper.currentPosition() != 100)
+  {
+    stepper.setSpeed(200);
+    stepper.runSpeed();
+  }
+  stepper.disableOutputs();
+}
+
+void onStepForward(){
+  // Enable the stepper motor
+  stepper.enableOutputs();
+  #ifdef DEBUG
+  Serial.println("Command to step motor recieved");
+  #endif
+  stepper.setCurrentPosition(0);
+  while(stepper.currentPosition() != 1)
+  {
+    stepper.setSpeed(100);
+    stepper.runSpeed();
+  }
+  stepper.disableOutputs();
+}
+
+void onStepBackward(){
+  // Enable the stepper motor
+  stepper.enableOutputs();
+  #ifdef DEBUG
+  Serial.println("Command to step motor recieved");
+  #endif
+  stepper.setCurrentPosition(0);
+  while(stepper.currentPosition() != -1)
+  {
+    stepper.setSpeed(-100);
+    stepper.runSpeed();
+  }
+  stepper.disableOutputs();
 }
 
 void onStop() {
   // Force all motors to come to a stop immediately
-  analogWrite(MotorA, 0);
-  analogWrite(MotorB, 0);
+  ledcWrite(pwmChannelA, 0);
+  ledcWrite(pwmChannelB, 0);
+  delay(500);
   digitalWrite(MotorIN1, LOW);
   digitalWrite(MotorIN2, LOW);
   digitalWrite(MotorIN3, LOW);
   digitalWrite(MotorIN4, LOW);
+  motorRunning = false;
   #ifdef DEBUG
   Serial.print("All motor stop command received!");
   #endif
@@ -154,12 +187,14 @@ void onStop() {
 }
 
 void onOpen() {
-  // Activate the linear actuator for 5 seconds
-  analogWrite(MotorB, 255);
+  // Activate the linear actuator for 2 seconds
+  ledcWrite(pwmChannelB, 255);
+  delay(500);
   digitalWrite(MotorIN3, LOW);
   digitalWrite(MotorIN4, HIGH);
+  delay(2000);
+  ledcWrite(pwmChannelB, 0);
   delay(500);
-  analogWrite(MotorB, 0);
   digitalWrite(MotorIN3, LOW);
   digitalWrite(MotorIN4, LOW);
   #ifdef DEBUG
@@ -169,12 +204,12 @@ void onOpen() {
 }
 
 void onClose() {
-  // Activate the linear actuator in the other direction for 5 seconds
-  analogWrite(MotorB, 255);
+  // Activate the linear actuator in the other direction for 2 seconds
+  ledcWrite(pwmChannelB, 255);
   digitalWrite(MotorIN3, HIGH);
   digitalWrite(MotorIN4, LOW);
-  delay(500);
-  analogWrite(MotorB, 0);
+  delay(2000);
+  ledcWrite(pwmChannelB, 0);
   digitalWrite(MotorIN3, LOW);
   digitalWrite(MotorIN4, LOW);
   #ifdef DEBUG
@@ -184,16 +219,23 @@ void onClose() {
 }
 
 void onReverse() {
-  analogWrite(MotorA, 255);
+  ledcWrite(pwmChannelA, 255);
+  delay(500);
   digitalWrite(MotorIN1, HIGH);
   digitalWrite(MotorIN2, LOW);
+  motorRunning = true;
   #ifdef DEBUG
   Serial.print("Reverse motor command received");
   #endif
   client.publish(hostTopic, "Reverse motor command received");
-  delay(500);
+  delay(2500);  
   digitalWrite(MotorIN1, LOW);
   digitalWrite(MotorIN2, HIGH);
+  delay(1500);
+  ledcWrite(pwmChannelA, 0);
+  digitalWrite(MotorIN1, LOW);
+  digitalWrite(MotorIN2, LOW);
+  motorRunning = false;
 }
 
 
@@ -224,7 +266,12 @@ void callback(char* thisTopic, byte* message, unsigned int length) {
     onOpen();
   } else if (strcmp(messageArrived, "close") == 0){
     onClose();
+  } else if (strcmp(messageArrived, "step") == 0){
+    onStepForward();
+  } else if (strcmp(messageArrived, "stepback") == 0){
+    onStepBackward();
   }
+
   Serial.println(messageArrived);
   Serial.println();
 }
@@ -234,7 +281,7 @@ void wifiSetup() {
   Serial.println("****************************");
   Serial.print("Connecting to ");
   Serial.println(ssid);
-  WiFi.begin(ssid);
+  WiFi.begin(ssid, pass);
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
@@ -263,7 +310,7 @@ void MQTTsetup() {
       Serial.println("Connected to MQTT broker");
 
       // Once connected, publish an announcement to the host
-      client.publish(hostTopic, "SPADS Connected!");
+      client.publish(hostTopic, "Vending Machine Connected!");
       // Subscribe to topics meant for this device
       client.subscribe(topic);
       Serial.println("Subscribed to topic: ");
@@ -284,46 +331,81 @@ void setup() {
 
 #ifdef DEBUG
   Serial.begin(115200);
+  Serial.print("Setting up DC Motors");
 #endif
+
+  pinMode(MotorA, OUTPUT);
+  pinMode(MotorB, OUTPUT);
+  
+  // attach the channel to the GPIO to be controlled
+  ledcSetup(pwmChannelA, freq, resolution);
+  ledcAttachPin(MotorA, pwmChannelA);
+  ledcSetup(pwmChannelB, freq, resolution);
+  ledcAttachPin(MotorB, pwmChannelB);
+  
+  // Turn off motors - Initial State
+  ledcWrite(pwmChannelA, 0);
+  ledcWrite(pwmChannelB, 0);
+
+  digitalWrite(MotorIN1, LOW);
+  digitalWrite(MotorIN2, LOW);
+  pinMode(MotorIN1, OUTPUT);
+  pinMode(MotorIN2, OUTPUT);
+  motorRunning = false;
+
+  digitalWrite(MotorIN3, LOW);
+  digitalWrite(MotorIN4, LOW);
+  pinMode(MotorIN3, OUTPUT);
+  pinMode(MotorIN4, OUTPUT);
+  delay(500);
+
+  #ifdef DEBUG
+  Serial.println("All motors should be off!");
+  #endif
 
   // Setup the wifi and MQTT connections
   wifiSetup();
   MQTTsetup();
+  delay(500);
   Serial.print("Connected to WIFI and MQTT!");
 
   // Set the speed of the dispenser stepper motor
-  dispenserStepper.setSpeed(60);
-
+  pinMode(33, OUTPUT);
+  //stepper.setEnablePin(33);
+  stepper.setMinPulseWidth(3);
+  stepper.setMaxSpeed(300);
+  stepper.setAcceleration(50);
+  stepper.setSpeed(100);
+  stepper.setCurrentPosition(0);
+  delay(500);
+  Serial.print("Stepper Motor settings established!");
+  //stepper.enableOutputs();
+    while(stepper.currentPosition() != 100)
+  {
+    
+    stepper.setSpeed(100);
+    stepper.runSpeed();
+  }
+  delay(1500);
+  Serial.print("Reversing stepper motor!");
+  stepper.setCurrentPosition(0);
+    while(stepper.currentPosition() != -100)
+  {
+    stepper.setSpeed(-100);
+    stepper.runSpeed();
+  }
+  Serial.print("Stepper motor test complete!");
+  stepper.disableOutputs();
   // Set all the control pins to outputs and inputs as appropriate.
   pinMode(coinCounter, INPUT);
-  pinMode(IRentrancePin, INPUT);
-  pinMode(IRexitPin, INPUT);
 
-  // Interrupt connected to pin 34 executing IncomingImpuls function when signal goes from High to Low
+  entranceButton.setDebounceTime(5);
+  exitButton.setDebounceTime(5);
+  delay(500);
+  Serial.print("Entrance and exit buttons established");
+
+  // Interrupt connected to pin 21 executing IncomingImpuls function when signal goes from High to Low
   attachInterrupt(digitalPinToInterrupt(coinCounter), incomingImpuls, FALLING);
-
-  pinMode(MotorA, OUTPUT);
-  pinMode(MotorIN1, OUTPUT);
-  pinMode(MotorIN2, OUTPUT);
-
-  pinMode(MotorB, OUTPUT);
-  pinMode(MotorIN3, OUTPUT);
-  pinMode(MotorIN4, OUTPUT);
-
-  pinMode(Dispenser1, OUTPUT);
-  pinMode(Dispenser2, OUTPUT);
-  pinMode(Dispenser3, OUTPUT);
-  pinMode(Dispenser4, OUTPUT);
-
-  // Turn off motors - Initial State
-  digitalWrite(MotorIN1, LOW);
-  digitalWrite(MotorIN2, LOW);
-  digitalWrite(MotorIN3, LOW);
-  digitalWrite(MotorIN4, LOW);
-  Serial.println("All motors should be off! Setup complete");
-
-  // attach the channel to the GPIO to be controlled
-  //ledcAttachPin(MotorA, pwmChannel);
 
   // Initialize the NeoPixel strip objects
 #ifdef DEBUG
@@ -333,7 +415,7 @@ void setup() {
   // Initialize the NeoPixel strip objects
   Strip1leds.begin();
   Strip1leds.show();
-  Strip1leds.setBrightness(75);
+  Strip1leds.setBrightness(175);
 
   for (int x = 0; x < Strip1_NUM_LEDS; x++) {
     // Cycle the lights blue
@@ -351,23 +433,35 @@ void setup() {
   Serial.println("LED's tested, turning on ambient lights!");
 
   Strip1leds.ColorSet(Strip1leds.Color(204, 85, 0), Strip1BStart, Strip1BLEN);
+  Serial.println("Checking Strip 1A");
+  Strip1leds.CylonEye(Strip1leds.Color(255, 0, 0), 100, Strip1AStart, Strip1ALEN, 3, 10, forward);
+  Strip1leds.Update();
+  Strip1leds.ColorSet(Strip1leds.Color(0, 0, 0), Strip1AStart, Strip1ALEN);
+  Strip1leds.Update();
   Serial.println("Setup Complete!");
+  delay(500);
 }
 
 //***************MAIN PROGRAM*******************/
 void loop() {  
+
+  entranceButton.loop();
+
+  exitButton.loop();
+
   curTime = millis();
 
   //If we have received a coin, activate stuff
   if (curTime - preTime >= coinInt and impulseCount==targetPulses) {
     Serial.print("Coin counted!");
-    //Serial.println(impulseCount);
+    Serial.println(impulseCount);
     onDispense(); 
-    //impulseCount=0;            // Reset the impulse counter
+    impulseCount=0;            // Reset the impulse counter
   }
 
   //If we haven't received a coin, keep waiting
   else {
+
   }
   /*
   Serial.print("Current Time = ");
@@ -380,41 +474,81 @@ void loop() {
   Serial.println(impulseCount);
   */
 
-  int IRentrance = digitalRead(IRentrancePin);
-  if (IRentrance == LOW) {
-    Serial.print("Ball entrance triggered!");
-    ballReturn++;
+  if (entranceButton.isPressed() && motorRunning == false) {
+    ballReturn = ballReturn + 1;
+    #ifdef DEBUG
+    Serial.println("Balls in the return ");
     Serial.print(ballReturn);
-    Strip1leds.Scanner(Strip1leds.Color(0, 119, 178), 50, Strip1AStart, Strip1_NUM_LEDS);
-    analogWrite(MotorA, 255);
+    #endif
+    // Start the Scanner pattern
+    Strip1leds.Scanner(Strip1leds.Color(0, 119, 178), 30, Strip1AStart, Strip1_NUM_LEDS, 7);
+    
+    // Update the pattern
+    Strip1leds.Update();
+
+    // Motor is not running, so turn it on
+    ledcWrite(pwmChannelA, 255);
     digitalWrite(MotorIN1, HIGH);
     digitalWrite(MotorIN2, LOW);
+    motorRunning = true;
     client.publish(hostTopic, "Ball entered escalator");
   }
 
-  int IRexit = digitalRead(IRexitPin);
-  if (IRexit == LOW){
-    Serial.print("Ball exit triggered!");
+  else if (entranceButton.isPressed() && motorRunning == true) {
+    ballReturn = ballReturn + 1;
+    #ifdef DEBUG
+    Serial.println("Balls in the return ");
     Serial.print(ballReturn);
-    ballReturn--;
-    client.publish(hostTopic, "Ball exited escalator");
-    Strip1leds.ColorSet(Strip1leds.Color(204, 85, 0), Strip1BStart, Strip1BLEN);
-    Strip1leds.ColorSet(Strip1leds.Color(0,0,0), Strip1AStart, Strip1ALEN);
+    #endif
+    client.publish(hostTopic, "Ball entered escalator");
+  
+    // Update the pattern
+    Strip1leds.Update();
+
   }
-  if (ballReturn == 0) {
-    analogWrite(MotorA, 0);
+
+  if (exitButton.isPressed()){
+    ballReturn = ballReturn - 1;
+    if(ballReturn < 0){
+      ballReturn = 0;
+      Serial.print("Ball Return reset to 0");
+    }
+
+    client.publish(hostTopic, "Ball exited escalator");
+    #ifdef DEBUG
+    Serial.print("Ball exited escalator!");
+    Serial.println("Balls in the return ");
+    Serial.print(ballReturn);
+    #endif    
+  }
+
+  else{
+  }
+
+  if (ballReturn == 0 and motorRunning == true) {
+    ledcWrite(pwmChannelA, 0);
     digitalWrite(MotorIN1, LOW);
     digitalWrite(MotorIN2, LOW);
+    motorRunning = false;
+    Strip1leds.ColorSet(Strip1leds.Color(204, 85, 0), Strip1BStart, Strip1BLEN);
+    Strip1leds.ColorSet(Strip1leds.Color(0,0,0), Strip1AStart, Strip1ALEN);
+
+    // Update the pattern to stop the scanner and turn on the ambient lighting
+    Strip1leds.Update();
+    #ifdef DEBUG
+    Serial.print("Ball return is now empty!");
+    #endif
   }
 
-  //delay(500);
+  else if(ballReturn > 0 and motorRunning == true)
+  {
+    Strip1leds.Update();
+  }
+
   client.loop();
-
-
-
   }
+
   void IRAM_ATTR incomingImpuls() {
   impulseCount = 1;
   preTime = curTime;
   }
-#endif

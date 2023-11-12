@@ -1,2 +1,2 @@
-#define SECRET_SSID "EscapeAdventures"
-#define SECRET_PASS ""
+#define SECRET_SSID "EscapeAdventuresLocal"
+#define SECRET_PASS "ArduinosOnly"

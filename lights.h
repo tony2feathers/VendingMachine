@@ -248,7 +248,7 @@ class NeoPatterns : public Adafruit_NeoPixel
                 show();
                 Increment();
             }
-            if(Index = TotalSteps)
+            if(Index == TotalSteps)
             {
                 Reverse();
             }
@@ -325,38 +325,57 @@ class NeoPatterns : public Adafruit_NeoPixel
     }
 
     // Initialize for a scanner
-    void Scanner(uint32_t color, uint8_t interval, int start, int len)
+    void Scanner(uint32_t color, uint8_t interval, int start, int len, int tailLength = 5)
     {
         ActivePattern = scanner;
         Interval = interval;
         Color1 = color;
-        TotalSteps = segmentLen * 2;
+        TotalSteps = (len + tailLength) * 2; // Adjust the multiplier to control the length of the tail
         segmentLen = len;
         segmentStart = start;
         Index = 0;
+        Direction = forward;
     }
 
-    // Update function for the scanner including a fading tail
+    // Update function for the scanner with a fading tail
     void ScannerUpdate()
     {
-        for(int i = segmentStart; i < segmentStart + segmentLen; i++)
+        for (int i = segmentStart; i < segmentStart + segmentLen; i++)
+    {
+        if (i == segmentStart + Index)
         {
-            if (i == segmentStart + Index) // Scan Pixel to the right
-            {
-                setPixelColor(i, Color1);
-            }
-            else if (i == segmentStart + TotalSteps - Index) // Scan Pixel to the left
-            {
-                setPixelColor(i, Color1);
-            }
-            else // Fading tail
-            {
-                setPixelColor(i, DimColor(getPixelColor(i)));
-            }
+            setPixelColor(i, Color1);
         }
-        show();
-        Increment();
+        else if (i == segmentStart + Index - 1)
+        {
+            setPixelColor(i, DimColor(getPixelColor(i)));
+        }
+        else if (i == segmentStart + Index - 2)
+        {
+            setPixelColor(i, DimColor(getPixelColor(i)));
+        }
+        else if (i == segmentStart + Index - 3)
+        {
+            setPixelColor(i, DimColor(getPixelColor(i)));
+        }
+        else if (i == segmentStart + Index - 4)
+        {
+            setPixelColor(i, DimColor(getPixelColor(i)));
+        }
+        else if (i == segmentStart + Index - 5)
+        {
+            setPixelColor(i, DimColor(getPixelColor(i)));
+        }
+        else
+        {
+            setPixelColor(i, 0);
+        }
     }
+    show();
+    Increment();
+}
+
+
 
     // Initialize for a fade effect
     void Fade(uint32_t color1, uint32_t color2, uint8_t interval, int start, int len, direction dir = forward)
