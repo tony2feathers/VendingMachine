@@ -32,28 +32,6 @@ class NeoPatterns : public Adafruit_NeoPixel
 {
 private:
     bool patternFinished = false;
-    bool isReadyToUpdate()
-    {
-        return (millis() - lastUpdate) > Interval;
-    }
-    float calculateBrightness(int distance, int maxDistance)
-    {
-        return 1.0 - (float)distance / maxDistance;
-    }
-
-    void updateSegmentPixels(int start, int len, uint32_t color, std::function<float(int, int)> brightnessCalc)
-    {
-        for (int i = start; i < start + len; i++)
-        {
-            int distance = abs(i - (start + len / 2));
-            float brightness = brightnessCalc(distance, len / 2);
-            setPixelColor(i, DimColor(Color(
-                                 brightness * Red(color),
-                                 brightness * Green(color),
-                                 brightness * Blue(color))));
-        }
-        show();
-    }
 
 public:
     // Member Variables:
@@ -76,10 +54,10 @@ public:
     int segmentStartB; // Member variable to store the starting pixel
     int segmentLenB;   // Member variable to store the length of a given segment
 
-    void (*OnComplete)(NeoPatterns *); // Callback on completion of pattern
+    void (*OnComplete)(NeoPatterns*); // Callback on completion of pattern
 
     // Constructor - calls base-class constructor to initialize the strip
-    NeoPatterns(uint16_t pixels, uint16_t pin, uint16_t type, void (*callback)(NeoPatterns *))
+    NeoPatterns(uint16_t pixels, uint16_t pin, uint16_t type, void (*callback)(NeoPatterns*))
         : Adafruit_NeoPixel(pixels, pin, type)
     {
         OnComplete = callback;
@@ -97,10 +75,9 @@ public:
     // Update the pattern
     void Update()
     {
-        if (isReadyToUpdate())
+        if ((millis() - lastUpdate) > Interval) // time to update
         {
             lastUpdate = millis();
-
             switch (ActivePattern)
             {
             case runningLights:
@@ -391,18 +368,32 @@ public:
     // Update function for cylon effect
     void CylonEyeUpdate()
     {
-        float brightnessCache[segmentLen];
-        for (int i = 0; i < segmentLen; i++)
-        {
-            brightnessCache[i] = calculateBrightness(abs(i - (segmentLen / 2)), EyeSize);
-        }
 
         for (int i = segmentStart; i < segmentStart + segmentLen; i++)
         {
-            setPixelColor(i, DimColor(Color(
-                                 brightnessCache[i - segmentStart] * Red(Color1),
-                                 brightnessCache[i - segmentStart] * Green(Color1),
-                                 brightnessCache[i - segmentStart] * Blue(Color1))));
+            // Calculate the distance of the pixel from the center of the segment
+            int distanceFromCenter = abs(i - (segmentStart + segmentLen / 2));
+
+            if (distanceFromCenter <= EyeSize) // Within the eye size range
+            {
+                // Calculate brightness based on distance from center
+                float brightness = 1.0 - (float)distanceFromCenter / EyeSize;
+
+                // Calculate color with reduced brightness
+                uint32_t dimmedColor = DimColor(Color(
+                    Red(Color1),
+                    Green(Color1),
+                    Blue(Color1)));
+
+                setPixelColor(i, DimColor(Color(
+                                     brightness * Red(Color1),
+                                     brightness * Green(Color1),
+                                     brightness * Blue(Color1))));
+            }
+            else // Fading outside the eye
+            {
+                setPixelColor(i, DimColor(getPixelColor(i)));
+            }
         }
         show();
         Increment();
@@ -428,20 +419,51 @@ public:
     }
 
     // Update function for the scanner with a fading tail
-    // ScannerUpdate: Animates two segments with fading tails moving in opposite directions.
-    // - TailBrightness: Calculates the brightness of tail pixels based on distance from the active pixel.
-    // - Segment A and Segment B are updated independently using the `updateSegmentPixels` function.
-
     void ScannerUpdate()
     {
-        auto tailBrightness = [this](int distance, int tailLength) -> float
+        for (int i = segmentStart; i < segmentStart + segmentLen; i++)
         {
-            if (distance > tailLength) return 0.0; // No brightness outside the tail range
-            return (float)(tailLength - distance) / tailLength;
-        };
-
-        updateSegmentPixels(segmentStart, segmentLen, Color1, tailBrightness);
-        updateSegmentPixels(segmentStartB, segmentLenB, Color2, tailBrightness);
+            if (i == segmentStart + Index && i <= (segmentStart + segmentLen) / 2)
+            {
+                setPixelColor(i, Color1);
+                for (int x = 1; x <= TailLengthA; x++)
+                {
+                    setPixelColor(i - x, DimColor(Color1));
+                }
+            }
+            else if (i == segmentStart + Index && i > (segmentStart + segmentLen) / 2)
+            {
+                setPixelColor(i, Color1);
+                for (int z = i - (segmentStart + segmentLen) / 2; z <= (segmentStart + segmentLen) / 2; z++)
+                {
+                    setPixelColor(i - z, Color1);
+                    for (int y = 1; y <= TailLengthA; y++)
+                    {
+                        setPixelColor(z + y, DimColor(Color1));
+                    }
+                }
+            }
+            else
+            {
+                setPixelColor(i, 0);
+            }
+        }
+        for (int j = segmentStartB; j < segmentStartB + segmentLenB; j++)
+        {
+            if (j == segmentStartB + Index)
+            {
+                setPixelColor(j, Color2);
+                for (int y = 1; y <= TailLengthB; y++)
+                {
+                    setPixelColor(j - y, DimColor(Color2));
+                }
+            }
+            else
+            {
+                setPixelColor(j, 0);
+            }
+        }
+        show();
         Increment();
     }
 
@@ -463,9 +485,6 @@ public:
     // Update the fade effect
     void FadeUpdate()
     {
-        if (TotalSteps == 0)
-            return; // Prevent division-by-zero
-
         // Calculate linear inerpolation between the colors
         // Optomise the order of operations to min truncation error
         uint8_t red = ((Red(Color1) * (TotalSteps - Index)) + (Red(Color2) * Index)) / TotalSteps;
@@ -506,7 +525,7 @@ public:
         Increment();
 
         // Accelerate: decrease interval to a minimum limit
-        Interval = max(20, Interval - 5); // Decrease interval, minimum 20ms
+        Interval = max(20, Interval - 5); // Decrease interval, minimum 5ms
     }
 
     // Calculate 50% dimmed version of a color used by scannerUpdate
@@ -520,7 +539,9 @@ public:
     // Set all pixels to a color (synchronously)
     void ColorSet(uint32_t color, int start, int len)
     {
-        for (int i = start; i < start + len; i++)
+        segmentStart = start;
+        segmentLen = len;
+        for (int i = segmentStart; i < segmentStart + segmentLen; i++)
         {
             setPixelColor(i, color);
         }
@@ -551,22 +572,28 @@ public:
     {
         WheelPos = 255 - WheelPos;
         if (WheelPos < 85)
+        {
             return Color(255 - WheelPos * 3, 0, WheelPos * 3);
+        }
         else if (WheelPos < 170)
         {
             WheelPos -= 85;
             return Color(0, WheelPos * 3, 255 - WheelPos * 3);
         }
-        WheelPos -= 170;
-        return Color(WheelPos * 3, 255 - WheelPos * 3, 0);
-    }
-
-    // Default callback function that does nothing
-    void ambientCallback(NeoPatterns *instance)
-    {
-        // Do nothing
-        Serial.println("This is a message for the ambient callback function");
-        instance->markPatternFinished();
+        else
+        {
+            WheelPos -= 170;
+            return Color(WheelPos * 3, 255 - WheelPos * 3, 0);
+        }
     }
 };
+
+// Default callback function that does nothing
+void ambientCallback(NeoPatterns *instance)
+{
+    // Do nothing
+    Serial.println("This is a message for the ambient callback function");
+    instance->markPatternFinished();
+}
+
 #endif // LIGHTS
